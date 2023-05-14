@@ -1,0 +1,153 @@
+Matei Costescu 323CA
+matei.costescu@stud.acs.upb.ro
+
+Tema 2 Pcom
+
+This homework requires to have a server that accepts clients on a subscription
+based systems and can communicate with them through TCP messaged and update
+the subscribers when receiving UDP messages.
+
+For this I have organized the program like this
+
+-server
+  -multi (this has the job to select the proper fd's for the server)
+    -tcp (this actuallly deals with all the actions regarding the socket)
+      -tcp_buffered (This is deals with all the packets that are send to a fd)
+    -udp (this is actaully pretty ussless)
+  -subscrbie (deals with sending, reading and generating subscriber packets)
+  
+-client
+  -multi
+    -tcp
+      -tcp_buffered
+  -subscrbie
+  
+* Server *
+
+For the serve I like to organize it into 2 stages the setup which is anything
+before the loop and the loop which actually handles all the messages sent
+
+- Setup -
+
+When starting a script we receive a port through our parameters so we can
+initialize our port based on that. During this type we also set fd_set on zero
+Now after that we need to initialize the sockets for UDP and TCP so we get 
+them and bind them(also set options for TCP). After that we also have to set
+STDIN_FILENO to the file desciptor set so our server is able to receive 
+commands from keyboard.
+
+- Loop -
+
+Now this is the main process of the server here for as long as the server is
+up we cycle throufg any socket file descriptor (from now on i'll refer to
+them as fd's) // more details in multi
+
+Now dealing with a fd that is set. First we need to identify what kind of
+socket we are dealing with.
+These could be STDIN_FILENO, UDP, NON_ACCEPTED TCP, CLOSED OR TCP MESSAGE.
+
+/STDIN_FILENO
+This is the most straight forward one and it only has commands from keyboard,
+more precisely the command exit to end the process
+
+/UDP
+
+These are signals to update all subscribers on a certain topic. So first we
+have to receive data in a buffer, than we have to reorder the information in
+a more digestable struct for the client by piling all the data inside a buffer
+than putting the size and buffer in a struct and the going through all the
+subscribers of our topic and sending them the packet one by one. To be
+noted for the case that we have a sub with sf = 1 which is not on we store
+the packet into their strcut saved inside a map and wait for their return to
+send the news.
+
+/NON ACCEPTED TCP
+
+Again a simple one. Since we didn't accept this we have to accept the socket
+fd and of course add it into our socket map and also set in the fd_set
+
+/CLOSED
+
+Our socket is closed so we have to print the client disconnect and update the
+subscriber struct to disconnecting while removing his fd from the id map, 
+since he's old fd no longer associate with its id.
+
+/TCP MESSAGE
+
+If we receive an fd that is already accepted it means we received a message
+from a client. So we first load it into a buffer and then have to identify
+the motive or the type of the message:
+
+- Authentifications:
+
+This means a client connected. If he is new we add him to the subscriber map
+and we update anyway his fd, his connected status while setting his id to the
+new fd in the id map.
+
+- Duplicatte:
+
+The client was already connected so we decline their access.
+
+Note: for both these types we have to send back a message with the outcome of
+their attemp to connect. While updating the first with all the packets they
+would of received if they would of been connected
+
+- Subscribe and Unsubscribe
+
+For this we only have to add or remove their id and sf from the topic map
+
+After the loop we close everyting we opened.
+
+* Client *
+
+This again has a setup and loop stage
+
+- Setup -
+
+When starting a script we receive an id, an IP and again a port. So first we
+try to connect to the TCP from our address to the TCP socket of the server
+using the port. After "connecting" we send and authentification request, 
+meaning a packet with the type of the request and our ID. After that we await
+a response and if every every thing went well we can go to the next stage
+
+- Loop -
+
+Again we have to cycle through the fd's using select. And now again we have
+different type of sockets:
+
+/STDIN_FILENO
+
+A bit more complicated than the one from the server, but it's still reading
+and parsing a buffer. We can have the exit commnad which has the same role, we
+have invalids commands which we ignore and we have Subscribe and Unsubscribe
+commands, for which we generate a packet with the type of command and the
+topic we are requesting a subscription or unsubscription to(+ a Sf if needed)
+
+/CLOSED
+
+Since we only have one socket this makes our client ussless since we can't 
+communicate anymore so we can just close him
+
+/TCP MESSAGE
+
+This means we received news regarding our subscriptions. So we upload them
+onto a buffer and we start parsing them. This process is pretty tidious
+because we have to extract the adress and the port than 50 Bytes of topic, 
+then a data_type which we have to convert through a switch into string, than
+based on the data type we have. We have to construct a value for that data
+type which we than convert back to a string for easier printing. After we got
+all those we can finally print them
+
+* Additional information *
+I think TCP and Subscribe have all their functionality explained already. 
+However the cycling between fds is a bit more complex and it all happens in 
+my multi class. For that i used select which tells me if at least one
+fd is set in my fd_set. Then we cycle through all fds. Then when a fd is set
+ we check its type. For any type except a TCP which is in our socket map we
+ can just add the fd.
+ 
+ For the other case we have to read the packets in Tcp_buffer class. Here I
+ have to add that every time i send something through TCP, i had the format
+ pack_t {size, buffer}.
+ 
+ This is everyting esential
